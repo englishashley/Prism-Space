@@ -10,7 +10,7 @@ Exploring the feasibility of real-time AI model training in orbit using federate
 ---
 
 ## Project Overview
-Prism Space is focused on advancing space-based AI compute infrastructure, enabling autonomous learning and edge processing in orbit. 
+Prism Space is focused on advancing space-based AI computing infrastructure, enabling autonomous learning and edge processing in orbit. 
 
 This repository contains Jupyter Notebook simulations analyzing the power and cost tradeoffs for federated learning (FL) using optical inter-satellite links (OISLs).
 
@@ -23,9 +23,9 @@ This repository contains Jupyter Notebook simulations analyzing the power and co
 
 ## Key Features
 Power Consumption Analysis – Calculates training power requirements for different FL architectures.  
-Cost-beneift optimization – Identifies the optimal number of sats where power savings justify launch  
-OISL bandwith impact – Simulates the impact of intersatellite links on training efficiency.  
-Scalability testing - Evaluates how increasing the **number of satellites** affects power efficiency.  
+Cost-benefit optimization – Identifies the optimal number of sats where power savings justify launch  
+OISL bandwidth impact – Simulates the effect of inter-satellite links on training efficiency.  
+Scalability testing - Evaluate how increasing the **number of satellites** affects power efficiency.  
 
 ---
 
