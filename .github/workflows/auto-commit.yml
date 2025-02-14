@@ -1,0 +1,26 @@
+name: Auto Commit & Push
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"  # Runs every 30 minutes
+  push:
+    branches:
+      - main  # Runs on any push to main branch
+
+jobs:
+  auto-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions@github.com"
+
+      - name: Auto-commit changes
+        run: |
+          git add .
+          git commit -m "Automated commit from GitHub Actions" || echo "No changes to commit"
+          git push
