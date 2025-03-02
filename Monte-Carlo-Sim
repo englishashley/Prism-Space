@@ -1,0 +1,278 @@
+import numpy as np
+import random
+import matplotlib.pyplot as plt
+
+################################################################################
+# SIMPLIFIED RADIATION MODEL
+################################################################################
+
+# Material properties: approximate stopping power for protons/electrons, densities
+# "LET" is a stand-in for effective attenuation in an exponential model
+# These numbers are simplified placeholders, not official NASA data.
+MATERIALS = {
+    "Aluminum":      {"density": 2.7,  "LET": 1.5},
+    "Tungsten":      {"density": 19.3, "LET": 4.0},
+    "BoronPolymer":  {"density": 1.2,  "LET": 3.0},
+    "Polymer":       {"density": 0.95, "LET": 2.0},
+    "Lead":          {"density": 11.34, "LET": 3.5},  # New material added
+}
+
+# Example “incident flux” representing a mix of 10-100 MeV protons
+ENERGY_LEVELS = np.linspace(10, 100, 100)
+INCIDENT_FLUX = np.exp(-ENERGY_LEVELS / 50)  # Simple decaying spectrum
+
+def attenuation_factor(material, thickness_cm):
+    """
+    Return exponential attenuation factor e^(-LET*density*thickness) 
+    for a given material and thickness in cm.
+    """
+    props = MATERIALS[material]
+    stopping_power = props["LET"] * props["density"]  # Simplified
+    return np.exp(-stopping_power * thickness_cm)
+
+def compute_transmitted_flux(layers, energy_levels, incident_flux):
+    """
+    Compute the final transmitted flux after passing through each layer in 'layers'.
+    Each layer is a tuple: (material_name, thickness_in_cm).
+    """
+    flux = np.copy(incident_flux)
+    for mat, thick in layers:
+        att = attenuation_factor(mat, thick)
+        flux *= att  # multiply flux by attenuation factor
+    return flux
+
+def compute_total_dose(layers):
+    """
+    Approximate the 'dose' by integrating the final flux over the energy range.
+    Lower is better. This is our 'fitness' function to minimize.
+    """
+    transmitted = compute_transmitted_flux(layers, ENERGY_LEVELS, INCIDENT_FLUX)
+    # Simple integral of flux as a stand-in for dose
+    total_dose = np.trapz(transmitted, ENERGY_LEVELS)
+    return total_dose
+
+def compute_total_mass(layers, area=1.0):
+    """
+    Estimate mass in kg for a given set of layers over a given area (default=1 m^2).
+    mass = density * thickness (cm) * area (m^2) * 10, because 1 cm thickness over 1 m^2 
+    is 0.01 m * 1 m^2 = 0.01 m^3, and density is in g/cm^3 => conversion factor ~10 
+    to get kg.
+    """
+    mass_kg = 0.0
+    for mat, thick_cm in layers:
+        dens = MATERIALS[mat]["density"]  # g/cm^3
+        volume_cm3 = area * (thick_cm * 10000.0)  # 1 m^2 => 10000 cm^2
+        # mass in grams
+        mass_g = dens * volume_cm3
+        # convert grams to kg
+        mass_kg_layer = mass_g / 1000.0
+        mass_kg += mass_kg_layer
+    return mass_kg
+
+################################################################################
+# GENETIC ALGORITHM
+################################################################################
+
+# Let's define the 'genes' for each layer: (material_index, thickness_in_cm)
+# We'll allow certain materials in certain layers, or let the GA pick from a set.
+
+MATERIAL_OPTIONS = ["Aluminum", "Tungsten", "BoronPolymer", "Lead"]  # Added "Lead"
+NUM_LAYERS = 5  # e.g., we want 5 layers total
+
+# Constraints
+MIN_THICKNESS = 0.01  # cm
+MAX_THICKNESS = 0.5   # cm
+
+POP_SIZE = 30
+NUM_GENERATIONS = 50
+MUTATION_RATE = 0.1
+ELITE_SIZE = 4
+
+def random_individual():
+    """
+    Create a random 'individual' representing a layering solution.
+    Each layer is (material_index, thickness).
+    """
+    individual = []
+    for _ in range(NUM_LAYERS):
+        mat_idx = np.random.randint(len(MATERIAL_OPTIONS))
+        thickness = np.random.uniform(MIN_THICKNESS, MAX_THICKNESS)
+        individual.append((mat_idx, thickness))
+    return individual
+
+def decode_individual(individual):
+    """
+    Convert from (material_index, thickness) to actual (material_name, thickness).
+    """
+    layers = []
+    for mat_idx, thick in individual:
+        mat_name = MATERIAL_OPTIONS[mat_idx]
+        layers.append((mat_name, thick))
+    return layers
+
+def fitness(individual):
+    """
+    Fitness function to balance minimizing total dose and mass.
+    We'll combine them: total_dose + alpha*(mass).
+    Lower is better.
+    """
+    layers = decode_individual(individual)
+    dose = compute_total_dose(layers)
+    mass = compute_total_mass(layers, area=1.0)  # 1 m^2
+    alpha = 0.5  # weighting factor for mass penalty
+    return dose + alpha * mass
+
+def maximize_radiation_protection(individual):
+    """
+    Function to maximize radiation protection while balancing weight.
+    We'll use the inverse of the fitness function.
+    Higher is better.
+    """
+    return 1 / fitness(individual)
+
+def crossover(parent1, parent2):
+    """
+    Single-point crossover. We'll randomly pick a cut point in the layer list.
+    """
+    cut = np.random.randint(1, NUM_LAYERS)
+    child1 = parent1[:cut] + parent2[cut:]
+    child2 = parent2[:cut] + parent1[:cut]
+    return child1, child2
+
+def mutate(individual):
+    """
+    Randomly mutate layer thickness or material index.
+    """
+    for i in range(NUM_LAYERS):
+        if np.random.rand() < MUTATION_RATE:
+            # random change in material or thickness
+            if np.random.rand() < 0.5:
+                # mutate material
+                individual[i] = (np.random.randint(len(MATERIAL_OPTIONS)), individual[i][1])
+            else:
+                # mutate thickness
+                new_thick = np.random.uniform(MIN_THICKNESS, MAX_THICKNESS)
+                individual[i] = (individual[i][0], new_thick)
+    return individual
+
+def tournament_selection(pop, k=3):
+    """
+    Tournament selection: pick k individuals, return the best.
+    """
+    selected = random.sample(pop, k)
+    best = min(selected, key=lambda ind: fitness(ind))
+    return best
+
+def rotate_layers(individual):
+    """
+    Rotate the layers of the individual to create a new configuration.
+    """
+    rotated_individual = individual[1:] + individual[:1]
+    return rotated_individual
+
+def add_layer(individual, material_index=None, thickness=None):
+    """
+    Add a new layer to the individual. If material_index or thickness is not provided,
+    they will be randomly generated.
+    """
+    if material_index is None:
+        material_index = np.random.randint(len(MATERIAL_OPTIONS))
+    if thickness is None:
+        thickness = np.random.uniform(MIN_THICKNESS, MAX_THICKNESS)
+    individual.append((material_index, thickness))
+    return individual
+
+def change_layer_configuration(individual, layer_index, material_index=None, thickness=None):
+    """
+    Change the configuration of a specific layer in the individual.
+    If material_index or thickness is not provided, the current value will be kept.
+    """
+    current_material_index, current_thickness = individual[layer_index]
+    new_material_index = material_index if material_index is not None else current_material_index
+    new_thickness = thickness if thickness is not None else current_thickness
+    individual[layer_index] = (new_material_index, new_thickness)
+    return individual
+
+def genetic_algorithm(maximize=False):
+    # Initialize population
+    population = [random_individual() for _ in range(POP_SIZE)]
+    
+    best_fitness_evolution = []
+    
+    for gen in range(NUM_GENERATIONS):
+        # Evaluate fitness
+        if maximize:
+            pop_sorted = sorted(population, key=lambda ind: maximize_radiation_protection(ind), reverse=True)
+            best_individual = pop_sorted[0]
+            best_fit = maximize_radiation_protection(best_individual)
+        else:
+            pop_sorted = sorted(population, key=lambda ind: fitness(ind))
+            best_individual = pop_sorted[0]
+            best_fit = fitness(best_individual)
+        
+        best_fitness_evolution.append(best_fit)
+        
+        # Elitism: keep the top N
+        new_population = pop_sorted[:ELITE_SIZE]
+        
+        # Fill the rest of population
+        while len(new_population) < POP_SIZE:
+            # select parents
+            parent1 = tournament_selection(pop_sorted)
+            parent2 = tournament_selection(pop_sorted)
+            # crossover
+            child1, child2 = crossover(parent1, parent2)
+            # mutate
+            child1 = mutate(child1)
+            child2 = mutate(child2)
+            new_population.append(child1)
+            if len(new_population) < POP_SIZE:
+                new_population.append(child2)
+        
+        # Rotate layers for additional configurations
+        for i in range(len(new_population)):
+            if np.random.rand() < 0.5:  # 50% chance to rotate
+                new_population[i] = rotate_layers(new_population[i])
+        
+        population = new_population
+        
+        if gen % 5 == 0:
+            print(f"Generation {gen}: Best Fitness = {best_fit:.4f}")
+    
+    # final best
+    if maximize:
+        pop_sorted = sorted(population, key=lambda ind: maximize_radiation_protection(ind), reverse=True)
+    else:
+        pop_sorted = sorted(population, key=lambda ind: fitness(ind))
+    best_ind = pop_sorted[0]
+    return best_ind, best_fitness_evolution
+
+################################################################################
+# RUN THE GA
+################################################################################
+
+if __name__ == "__main__":
+    best_solution, fit_history = genetic_algorithm(maximize=True)  # Set maximize to True
+    
+    # Decode the best layering
+    best_layers = decode_individual(best_solution)
+    
+    # Evaluate final performance
+    final_dose = compute_total_dose(best_layers)
+    final_mass = compute_total_mass(best_layers, area=1.0)  # for 1 m^2 area
+    
+    print("\n=== BEST LAYER CONFIGURATION FOUND ===")
+    for i, (mat, thick) in enumerate(best_layers):
+        print(f"Layer {i+1}: {mat} @ {thick*10:.2f} mm")
+    print(f"Approx. Final Dose (arbitrary units): {final_dose:.4f}")
+    print(f"Approx. Shield Mass (1 m^2 area): {final_mass:.2f} kg\n")
+    
+    # Plot fitness evolution
+    plt.figure()
+    plt.plot(fit_history, '-o', label="Best Fitness Each Generation")
+    plt.xlabel("Generation")
+    plt.ylabel("Fitness (Dose + alpha*Mass)")
+    plt.title("GA Optimization of Multi-Layer Shielding")
+    plt.grid()
+    plt.legend()
+    plt.show()
